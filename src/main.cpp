@@ -1,67 +1,101 @@
 #include <WiFi.h>
 #include <WebSocketsServer.h>
-#include <ESP32Servo.h>  // Для работы с сервоприводом на ESP32
+#include <ESP32Servo.h>
 
+// Wi-Fi AP настройки
 const char* ssid = "ESP32_SERVO_AP";
 const char* password = "12345678";
 
-const int servoPin = 13;  // Пин, к которому подключено серво
-Servo servo1;  // Создаем объект для серво
+// WebSocket сервер
+WebSocketsServer webSocket = WebSocketsServer(81);
 
-WebSocketsServer webSocket = WebSocketsServer(81);  // WebSocket сервер на порту 81
+// Пины для сервоприводов
+const int SERVO1_PIN = 13;
+const int SERVO2_PIN = 12;
+const int SERVO3_PIN = 14;
 
-// Переменная для текущего угла серво
-int currentAngle = 0;
+// Объекты сервоприводов
+Servo servo1;
+Servo servo2;
+Servo servo3;
 
-// WebSocket обработчик событий
-void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
-  switch (type) {
-    case WStype_CONNECTED: {
-      Serial.printf("Client [%u] connected\n", num);
-      break;
-    }
-    case WStype_TEXT: {
-      String message = String((char*)payload);
-      Serial.printf("Received from client: %s\n", message.c_str());
-
-      // Если получена команда в формате "SET_SERVO:angle", перемещаем серво
-      if (message.startsWith("SET_SERVO:")) {
-        String angleStr = message.substring(10);  // Извлекаем угол после "SET_SERVO:"
-        int angle = angleStr.toInt();  // Преобразуем строку в число
-        if (angle >= 0 && angle <= 180) {
-          servo1.write(angle);  // Перемещаем серво в заданный угол
-          currentAngle = angle;  // Обновляем текущий угол
-          webSocket.sendTXT(num, "Servo moved to angle: " + String(angle));
-        } else {
-          webSocket.sendTXT(num, "Invalid angle. Must be between 0 and 180.");
-        }
-      } else {
-        webSocket.sendTXT(num, "Unknown command");
-      }
-      break;
-    }
-    default:
-      break;
+// ===== Получение серво по ID =====
+Servo* getServoById(int id) {
+  switch (id) {
+    case 1: return &servo1;
+    case 2: return &servo2;
+    case 3: return &servo3;
+    default: return nullptr;
   }
 }
 
+// ===== Установка угла серво =====
+void setServoAngle(int servoId, float angle) {
+  Serial.printf("[SIMULATION] M%d -> %.1f degrees\n", servoId, angle);
+
+  // Раскомментируй при подключении серво:
+  // Servo* servo = getServoById(servoId);
+  // if (servo != nullptr) {
+  //   servo->write(angle);
+  // }
+}
+
+// ===== Обработка команды (M1:90.0) =====
+void handleCommand(const String& cmd, uint8_t client_id) {
+  if (!cmd.startsWith("M")) return;
+
+  int colonIndex = cmd.indexOf(':');
+  if (colonIndex <= 1) return;
+
+  int servoId = cmd.substring(1, colonIndex).toInt();
+  float angle = cmd.substring(colonIndex + 1).toFloat();
+
+  if (angle < 0 || angle > 180) {
+    webSocket.sendTXT(client_id, "ESP:ERR:M" + String(servoId) + " (invalid angle)");
+    return;
+  }
+
+  setServoAngle(servoId, angle);
+  webSocket.sendTXT(client_id, "ESP:OK:M" + String(servoId) + ":" + String(angle));
+}
+
+// ===== Обработка WebSocket =====
+void onWebSocketEvent(uint8_t client_id, WStype_t type, uint8_t *payload, size_t length) {
+  if (type == WStype_TEXT) {
+    String message = String((char*)payload);
+    Serial.println("Received: " + message);
+
+    int index = 0;
+    while (index < message.length()) {
+      int nextComma = message.indexOf(',', index);
+      String cmd = (nextComma == -1) ? message.substring(index) : message.substring(index, nextComma);
+      cmd.trim();
+      index = (nextComma == -1) ? message.length() : nextComma + 1;
+      handleCommand(cmd, client_id);
+    }
+  }
+}
+
+// ===== setup() =====
 void setup() {
   Serial.begin(115200);
-  servo1.attach(servoPin);  // Подключаем серво к указанному пину
 
+  // Запуск Wi-Fi в режиме AP
   WiFi.softAP(ssid, password);
-  Serial.print("Access Point Started: ");
-  Serial.println(ssid);
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.softAPIP());
+  Serial.println("Access Point started");
+  Serial.println("IP address: " + WiFi.softAPIP().toString());
 
+  // Привязка сервоприводов (если используешь)
+  // servo1.attach(SERVO1_PIN);
+  // servo2.attach(SERVO2_PIN);
+  // servo3.attach(SERVO3_PIN);
+
+  // Инициализация WebSocket
   webSocket.begin();
   webSocket.onEvent(onWebSocketEvent);
 }
 
+// ===== loop() =====
 void loop() {
-  webSocket.loop();  // Обработка событий WebSocket
-
-  // Здесь больше нет постоянного цикла движения серво
-  // Мы будем двигать серво только по команде через WebSocket
+  webSocket.loop();
 }

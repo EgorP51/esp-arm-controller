@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../../esp32_start"
+		},
+		{
+			"name": "ESPArmController",
+			"path": ".."
+		}
+	],
+	"settings": {}
+}
